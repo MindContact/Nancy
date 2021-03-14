@@ -3,7 +3,10 @@
     using System;
     using System.Collections.Generic;
     using System.Linq;
-    using Cookies;
+
+    using Nancy.Cookies;
+
+    using Nancy.Extensions;
 
     /// <summary>
     /// Context for content negotiation.
@@ -93,6 +96,22 @@
             return matching ?
                 this.MediaRangeModelMappings.First(m => mediaRange.Matches(m.Key)).Value.Invoke() :
                 this.DefaultModel;
+        }
+
+        /// <summary>
+        /// Sets the given Nancy module.
+        /// </summary>
+        /// <param name="module">The Nancy module instance.</param>
+        /// <exception cref="System.ArgumentNullException">module</exception>
+        public void SetModule(INancyModule module)
+        {
+            if (module == null)
+            {
+                throw new ArgumentNullException("module");
+            }
+
+            this.ModuleName = module.GetModuleName();
+            this.ModulePath = module.ModulePath;
         }
     }
 }

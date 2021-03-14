@@ -2,6 +2,7 @@
 {
     using System;
     using System.Text;
+
     using Nancy.Bootstrapper;
     using Nancy.Extensions;
     using Nancy.Security;
@@ -113,7 +114,7 @@
                 return null;
             }
 
-            if (!authorization.StartsWith(SCHEME))
+            if (!authorization.StartsWith(SCHEME, StringComparison.OrdinalIgnoreCase))
             {
                 return null;
             }

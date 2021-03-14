@@ -2,12 +2,15 @@ namespace Nancy.Hosting.Aspnet
 {
     using System;
     using System.Collections.Generic;
+    using System.Configuration;
     using System.Globalization;
     using System.Linq;
+    using System.Security.Cryptography.X509Certificates;
     using System.Threading.Tasks;
     using System.Web;
-    using IO;
+
     using Nancy.Extensions;
+    using Nancy.IO;
 
     /// <summary>
     /// Bridges the communication between Nancy and ASP.NET based hosting.
@@ -28,41 +31,15 @@ namespace Nancy.Hosting.Aspnet
         /// <summary>
         /// Processes the ASP.NET request with Nancy.
         /// </summary>
-        /// <param name="context">The <see cref="HttpContextBase"/> of the request.</param>
-        /// <param name="cb"></param>
-        /// <param name="state"></param>
-        public Task<Tuple<NancyContext, HttpContextBase>> ProcessRequest(HttpContextBase context, AsyncCallback cb, object state)
+        /// <param name="httpContext">The <see cref="HttpContextBase"/> of the request.</param>
+        public async Task ProcessRequest(HttpContextBase httpContext)
         {
-            var request = CreateNancyRequest(context);
+            var request = CreateNancyRequest(httpContext);
 
-            var tcs = new TaskCompletionSource<Tuple<NancyContext, HttpContextBase>>(state);
-
-            if (cb != null)
+            using(var nancyContext = await this.engine.HandleRequest(request).ConfigureAwait(false))
             {
-                tcs.Task.ContinueWith(task => cb(task), TaskContinuationOptions.ExecuteSynchronously);
+                SetNancyResponseToHttpResponse(httpContext, nancyContext.Response);
             }
-
-            this.engine.HandleRequest(
-                request, 
-                ctx => tcs.SetResult(new Tuple<NancyContext, HttpContextBase>(ctx, context)), 
-                tcs.SetException);
-
-            return tcs.Task;
-        }
-
-        public static void EndProcessRequest(Task<Tuple<NancyContext, HttpContextBase>> task)
-        {
-            if (task.IsFaulted)
-            {
-                var exception = task.Exception;
-                exception.Handle(ex => ex is HttpException);
-            }
-
-            var nancyContext = task.Result.Item1;
-            var httpContext = task.Result.Item2;
-
-            NancyHandler.SetNancyResponseToHttpResponse(httpContext, nancyContext.Response);
-            nancyContext.Dispose();
         }
 
         private static Request CreateNancyRequest(HttpContextBase context)
@@ -97,17 +74,20 @@ namespace Nancy.Hosting.Aspnet
 
             RequestStream body = null;
 
-            if (expectedRequestLength != 0)
+            if (expectedRequestLength != 0 || HasChunkedEncoding(incomingHeaders))
             {
-                body = RequestStream.FromStream(context.Request.InputStream, expectedRequestLength, true);
+                body = RequestStream.FromStream(context.Request.InputStream, expectedRequestLength, StaticConfiguration.DisableRequestStreamSwitching ?? true);
             }
+
+            var protocolVersion = context.Request.ServerVariables["HTTP_VERSION"];
 
             return new Request(context.Request.HttpMethod.ToUpperInvariant(), 
                 nancyUrl, 
                 body, 
                 incomingHeaders, 
                 context.Request.UserHostAddress, 
-                certificate);
+                new X509Certificate2(certificate),
+                protocolVersion);
         }
 
         private static long GetExpectedRequestLength(IDictionary<string, IEnumerable<string>> incomingHeaders)
@@ -117,13 +97,13 @@ namespace Nancy.Hosting.Aspnet
                 return 0;
             }
 
-            if (!incomingHeaders.ContainsKey("Content-Length"))
+            IEnumerable<string> values;
+            if (!incomingHeaders.TryGetValue("Content-Length", out values))
             {
                 return 0;
             }
 
-            var headerValue =
-                incomingHeaders["Content-Length"].SingleOrDefault();
+            var headerValue = values.SingleOrDefault();
 
             if (headerValue == null)
             {
@@ -139,6 +119,17 @@ namespace Nancy.Hosting.Aspnet
             return contentLength;
         }
 
+        private static bool HasChunkedEncoding(IDictionary<string, IEnumerable<string>> incomingHeaders)
+        {
+            IEnumerable<string> transferEncodingValue;
+            if (incomingHeaders == null || !incomingHeaders.TryGetValue("Transfer-Encoding", out transferEncodingValue))
+            {
+                return false;
+            }
+            var transferEncodingString = transferEncodingValue.SingleOrDefault() ?? string.Empty;
+            return transferEncodingString.Equals("chunked", StringComparison.OrdinalIgnoreCase);
+        }
+
         public static void SetNancyResponseToHttpResponse(HttpContextBase context, Response response)
         {
             SetHttpResponseHeaders(context, response);
@@ -148,13 +139,32 @@ namespace Nancy.Hosting.Aspnet
                 context.Response.ContentType = response.ContentType;
             }
 
+            if (IsOutputBufferDisabled())
+            {
+                context.Response.BufferOutput = false;
+            }
+
+            context.Response.StatusCode = (int) response.StatusCode;
+
             if (response.ReasonPhrase != null)
             {
                 context.Response.StatusDescription = response.ReasonPhrase;
             }
 
-            context.Response.StatusCode = (int)response.StatusCode;
-            response.Contents.Invoke(context.Response.OutputStream);
+            response.Contents.Invoke(new NancyResponseStream(context.Response));
+        }
+
+        private static bool IsOutputBufferDisabled()
+        {
+            var configurationSection =
+                ConfigurationManager.GetSection("nancyFx") as NancyFxSection;
+
+            if (configurationSection == null || configurationSection.DisableOutputBuffer == null)
+            {
+                return false;
+            }
+
+            return configurationSection.DisableOutputBuffer.Value;
         }
 
         private static void SetHttpResponseHeaders(HttpContextBase context, Response response)

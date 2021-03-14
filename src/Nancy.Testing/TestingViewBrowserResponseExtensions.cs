@@ -11,7 +11,7 @@
         /// </summary>
         /// <typeparam name="TType">the type of the model</typeparam>
         /// <param name="response">The <see cref="BrowserResponse"/> that the assert should be made on.</param>
-        /// <returns>a model of the <typeparam name="TType">type</typeparam></returns>
+        /// <returns>a model of the <typeparamref name="TType">type</typeparamref></returns>
         /// <remarks>This method requires that the <c>Browser</c> utilize the <see cref="TestingViewFactory"/></remarks>
         public static TType GetModel<TType>(this BrowserResponse response)
         {
@@ -53,12 +53,13 @@
 
         private static string GetContextValue(BrowserResponse response, string key)
         {
-            if (!response.Context.Items.ContainsKey(key))
+            object val;
+            if (!response.Context.Items.TryGetValue(key, out val))
             {
                 return string.Empty;
             }
 
-            var value = (string)response.Context.Items[key];
+            var value = (string)val;
             return string.IsNullOrEmpty(value) ? string.Empty : value;
         }
     }

@@ -2,11 +2,13 @@
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.Linq;
 
     /// <summary>
     /// Represents the result of a model validation.
     /// </summary>
+    [DebuggerDisplay("IsValid = {IsValid}")]
     public class ModelValidationResult
     {
         /// <summary>
@@ -42,6 +44,19 @@
         public IDictionary<string, IList<ModelValidationError>> Errors { get; set; }
 
         /// <summary>
+        /// Gets a clean representation of the errors.
+        /// </summary>
+        /// <returns></returns>
+        public IEnumerable<dynamic> FormattedErrors
+        {
+            get
+            {
+                var result = this.Errors.Select(x => new {Key = x.Key, Errors = x.Value.Select(y => y.ErrorMessage).ToArray()}); 
+                return result;
+            }
+        }
+
+        /// <summary>
         /// Gets a value indicating whether the validated instance is valid or not.
         /// </summary>
         /// <value><see langword="true"/> if the validated instance is valid; otherwise, <see langword="false"/>.</value>
@@ -62,14 +77,27 @@
 
             foreach (var result in results)
             {
+                IList<ModelValidationError> value;
                 foreach (var name in result.MemberNames)
                 {
-                    if (!output.ContainsKey(name))
+                    if (!output.TryGetValue(name, out value))
                     {
-                        output.Add(name, new List<ModelValidationError>());
+                        value = new List<ModelValidationError>();
+                        output.Add(name, value);
                     }
 
-                    output[name].Add(result);
+                    value.Add(result);
+                }
+                
+                if (!result.MemberNames.Any() && !string.IsNullOrEmpty(result.ErrorMessage))
+                {
+                    if (!output.TryGetValue(string.Empty, out value))
+                    {
+                        value = new List<ModelValidationError>();
+                        output.Add(string.Empty, value);
+                    }
+
+                    value.Add(result);
                 }
             }
 

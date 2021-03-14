@@ -30,7 +30,11 @@ namespace Nancy.Json
 {
     using System;
 
-	[AttributeUsage (AttributeTargets.Property | AttributeTargets.Field)]
+    /// <summary>
+    /// Property attribute for ignoring scripts.
+    /// </summary>
+    /// <seealso cref="System.Attribute" />
+    [AttributeUsage (AttributeTargets.Property | AttributeTargets.Field)]
     public sealed class ScriptIgnoreAttribute : Attribute
 	{
 	}

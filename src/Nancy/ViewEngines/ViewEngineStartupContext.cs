@@ -1,12 +1,16 @@
 ﻿namespace Nancy.ViewEngines
 {
-    using System.Collections.Generic;
-
     /// <summary>
     /// Context passed to each view engine on startup
     /// </summary>
     public class ViewEngineStartupContext
     {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ViewEngineStartupContext"/> class, with
+        /// the provided <paramref name="viewCache"/> and <paramref name="viewLocator"/>.
+        /// </summary>
+        /// <param name="viewCache">The view cache.</param>
+        /// <param name="viewLocator">The view locator.</param>
         public ViewEngineStartupContext(IViewCache viewCache, IViewLocator viewLocator)
         {
             this.ViewLocator = viewLocator;

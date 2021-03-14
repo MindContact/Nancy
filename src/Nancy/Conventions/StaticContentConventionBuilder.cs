@@ -1,3 +1,5 @@
+using Nancy.Diagnostics;
+
 namespace Nancy.Conventions
 {
     using System;
@@ -5,8 +7,9 @@ namespace Nancy.Conventions
     using System.IO;
     using System.Linq;
     using System.Text.RegularExpressions;
-    using Helpers;
-    using Responses;
+
+    using Nancy.Helpers;
+    using Nancy.Responses;
 
     /// <summary>
     /// Helper class for defining directory-based conventions for static contents.
@@ -52,7 +55,7 @@ namespace Nancy.Conventions
 
                 if (!pathWithoutFilename.StartsWith(requestedPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    ctx.Trace.TraceLog.WriteLog(x => x.AppendLine(string.Concat("[StaticContentConventionBuilder] The requested resource '", path, "' does not match convention mapped to '", requestedPath, "'" )));
+                    (ctx.Trace.TraceLog ?? new NullLog()).WriteLog(x => x.AppendLine(string.Concat("[StaticContentConventionBuilder] The requested resource '", path, "' does not match convention mapped to '", requestedPath, "'" )));
                     return null;
                 }
 
@@ -91,7 +94,7 @@ namespace Nancy.Conventions
                 }
 
                 var responseFactory =
-                    ResponseFactoryCache.GetOrAdd(new ResponseFactoryCacheKey(path, root), BuildContentDelegate(ctx, root, requestedFile, contentFile, new string[] { }));
+                    ResponseFactoryCache.GetOrAdd(new ResponseFactoryCacheKey(path, root), BuildContentDelegate(ctx, root, requestedFile, contentFile, ArrayCache.Empty<string>()));
 
                 return responseFactory.Invoke(ctx);
             };
@@ -102,6 +105,19 @@ namespace Nancy.Conventions
             try
             {
                 return Path.GetFileName(path);
+            }
+            catch (Exception)
+            {
+            }
+
+            return null;
+        }
+
+        private static string GetSafeFullPath(string path)
+        {
+            try
+            {
+                return Path.GetFullPath(path);
             }
             catch (Exception)
             {
@@ -149,11 +165,29 @@ namespace Nancy.Conventions
                 transformedRequestPath =
                     GetEncodedPath(transformedRequestPath);
 
+                var relativeFileName =
+                    Path.Combine(applicationRootPath, transformedRequestPath);
+
                 var fileName =
-                    Path.GetFullPath(Path.Combine(applicationRootPath, transformedRequestPath));
+                    GetSafeFullPath(relativeFileName);
+
+                if (fileName == null)
+                {
+                    context.Trace.TraceLog.WriteLog(x => x.AppendLine(string.Concat("[StaticContentConventionBuilder] The request '", relativeFileName, "' contains an invalid path character")));
+                    return ctx => null;
+                }
+
+                var relatveContentRootPath =
+                    Path.Combine(applicationRootPath, GetEncodedPath(contentPath));
 
                 var contentRootPath =
-                    Path.GetFullPath(Path.Combine(applicationRootPath, GetEncodedPath(contentPath)));
+                    GetSafeFullPath(relatveContentRootPath);
+
+                if (contentRootPath == null)
+                {
+                    context.Trace.TraceLog.WriteLog(x => x.AppendLine(string.Concat("[StaticContentConventionBuilder] The request '", fileName, "' is trying to access a path inside the content folder, which contains an invalid path character '", relatveContentRootPath, "'")));
+                    return ctx => null;
+                }
 
                 if (!IsWithinContentFolder(contentRootPath, fileName))
                 {

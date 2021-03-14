@@ -2,10 +2,12 @@ namespace Nancy
 {
     using System;
     using System.Collections.Generic;
-    using System.IO;
     using System.Linq;
-    using System.Runtime.Serialization.Formatters.Binary;
 
+    /// <summary>
+    /// Abstract base class for named pipelines.
+    /// </summary>
+    /// <typeparam name="TDelegate">The type of the delegate.</typeparam>
     public abstract class NamedPipelineBase<TDelegate>
     {
         /// <summary>
@@ -13,11 +15,18 @@ namespace Nancy
         /// </summary>
         protected readonly List<PipelineItem<TDelegate>> pipelineItems;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="NamedPipelineBase{TDelegate}"/> class.
+        /// </summary>
         protected NamedPipelineBase()
         {
             this.pipelineItems = new List<PipelineItem<TDelegate>>();
         }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="NamedPipelineBase{TDelegate}"/> class.
+        /// </summary>
+        /// <param name="capacity">The number of pipeline delegates.</param>
         protected NamedPipelineBase(int capacity)
         {
             this.pipelineItems = new List<PipelineItem<TDelegate>>(capacity);
@@ -140,7 +149,7 @@ namespace Nancy
         public virtual void InsertBefore(string name, PipelineItem<TDelegate> item)
         {
             var existingIndex =
-                this.pipelineItems.FindIndex(i => String.Equals(name, i.Name, StringComparison.InvariantCulture));
+                this.pipelineItems.FindIndex(i => String.Equals(name, i.Name, StringComparison.Ordinal));
 
             if (existingIndex == -1)
             {
@@ -170,7 +179,7 @@ namespace Nancy
         public virtual void InsertAfter(string name, PipelineItem<TDelegate> item)
         {
             var existingIndex =
-                this.pipelineItems.FindIndex(i => String.Equals(name, i.Name, StringComparison.InvariantCulture));
+                this.pipelineItems.FindIndex(i => String.Equals(name, i.Name, StringComparison.Ordinal));
 
             if (existingIndex == -1)
             {
@@ -202,7 +211,7 @@ namespace Nancy
             }
 
             var existingIndex =
-                this.pipelineItems.FindIndex(i => String.Equals(name, i.Name, StringComparison.InvariantCulture));
+                this.pipelineItems.FindIndex(i => String.Equals(name, i.Name, StringComparison.Ordinal));
 
             if (existingIndex != -1)
             {

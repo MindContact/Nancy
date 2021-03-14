@@ -3,6 +3,7 @@
     using System;
     using System.IO;
     using System.Threading.Tasks;
+
     using Nancy.Extensions;
 
     /// <summary>
@@ -10,6 +11,11 @@
     /// </summary>
     public class RequestStream : Stream
     {
+        internal const int BufferSize = 4096;
+
+        /// <summary>
+        /// The default switchover threshold
+        /// </summary>
         public static long DEFAULT_SWITCHOVER_THRESHOLD = 81920;
 
         private bool disableStreamSwitching;
@@ -18,7 +24,8 @@
         private Stream stream;
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="RequestStream"/> class.
+        /// Initializes a new instance of the <see cref="RequestStream"/> class, with
+        /// the provided <paramref name="expectedLength"/>, <paramref name="thresholdLength"/> and <paramref name="disableStreamSwitching"/>.
         /// </summary>
         /// <param name="expectedLength">The expected length of the contents in the stream.</param>
         /// <param name="thresholdLength">The content length that will trigger the stream to be moved out of memory.</param>
@@ -29,7 +36,8 @@
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="RequestStream"/> class.
+        /// Initializes a new instance of the <see cref="RequestStream"/> class, with
+        /// the provided <paramref name="expectedLength"/>, <paramref name="expectedLength"/> and <paramref name="disableStreamSwitching"/>.
         /// </summary>
         /// <param name="stream">The <see cref="Stream"/> that should be handled by the request stream</param>
         /// <param name="expectedLength">The expected length of the contents in the stream.</param>
@@ -40,7 +48,8 @@
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="RequestStream"/> class.
+        /// Initializes a new instance of the <see cref="RequestStream"/> class, with
+        /// the provided <paramref name="expectedLength"/> and <paramref name="disableStreamSwitching"/>.
         /// </summary>
         /// <param name="expectedLength">The expected length of the contents in the stream.</param>
         /// <param name="disableStreamSwitching">if set to <see langword="true"/> the stream will never explicitly be moved to disk.</param>
@@ -50,7 +59,8 @@
         }
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="RequestStream"/> class.
+        /// Initializes a new instance of the <see cref="RequestStream"/> class, with
+        /// the provided <paramref name="expectedLength"/>, <paramref name="expectedLength"/>, <paramref name="thresholdLength"/> and <paramref name="disableStreamSwitching"/>.
         /// </summary>
         /// <param name="stream">The <see cref="Stream"/> that should be handled by the request stream</param>
         /// <param name="expectedLength">The expected length of the contents in the stream.</param>
@@ -71,40 +81,26 @@
 
             if (!this.stream.CanSeek)
             {
-                var task =
-                    MoveToWritableStream();
-
-                task.Wait();
-
-                if (task.IsFaulted)
-                {
-                   throw new InvalidOperationException("Unable to copy stream", task.Exception);
-                }
+                this.MoveToWritableStream();
             }
 
             this.stream.Position = 0;
         }
 
-        private Task<object> MoveToWritableStream()
+        /// <summary>
+        /// Finalizes an instance of the <see cref="RequestStream"/> class.
+        /// </summary>
+        ~RequestStream()
         {
-            var tcs = new TaskCompletionSource<object>();
+            this.Dispose(false);
+        }
 
+        private void MoveToWritableStream()
+        {
             var sourceStream = this.stream;
-            this.stream = new MemoryStream(StreamExtensions.BufferSize);
+            this.stream = new MemoryStream(BufferSize);
 
-            sourceStream.CopyTo(this, (source, destination, ex) =>
-            {
-                if (ex != null)
-                {
-                    tcs.SetException(ex);
-                }
-                else
-                {
-                    tcs.SetResult(null);
-                }
-            });
-
-            return tcs.Task;
+            sourceStream.CopyTo(this.stream);
         }
 
         /// <summary>
@@ -181,6 +177,7 @@
             }
         }
 
+#if !NETSTANDARD1_6
         /// <summary>
         /// Begins an asynchronous read operation.
         /// </summary>
@@ -208,12 +205,20 @@
         {
             return this.stream.BeginWrite(buffer, offset, count, callback, state);
         }
+#endif
 
+        /// <summary>
+        /// Releases the unmanaged resources used by the <see cref="T:System.IO.Stream" /> and optionally releases the managed resources.
+        /// </summary>
+        /// <param name="disposing">true to release both managed and unmanaged resources; false to release only unmanaged resources.</param>
         protected override void Dispose(bool disposing)
         {
             if (this.isSafeToDisposeStream)
             {
-                ((IDisposable)this.stream).Dispose();
+                if (this.stream != null)
+                {
+                    this.stream.Dispose();
+                }
 
                 var fileStream = this.stream as FileStream;
                 if (fileStream != null)
@@ -224,7 +229,7 @@
 
             base.Dispose(disposing);
         }
-
+#if !NETSTANDARD1_6
         /// <summary>
         /// Waits for the pending asynchronous read to complete.
         /// </summary>
@@ -247,6 +252,7 @@
 
             this.ShiftStreamToFileStreamIfNecessary();
         }
+#endif
 
         /// <summary>
         /// Clears all buffers for this stream and causes any buffered data to be written to the underlying device.
@@ -256,26 +262,59 @@
             this.stream.Flush();
         }
 
+        /// <summary>
+        /// Creates a new request stream from a stream.
+        /// </summary>
+        /// <param name="stream">The stream.</param>
+        /// <returns>A request stream instance</returns>
         public static RequestStream FromStream(Stream stream)
         {
             return FromStream(stream, 0, DEFAULT_SWITCHOVER_THRESHOLD, false);
         }
 
+        /// <summary>
+        /// Creates a new request stream from a stream.
+        /// </summary>
+        /// <param name="stream">The stream.</param>
+        /// <param name="expectedLength">The expected length.</param>
+        /// <returns>A request stream instance</returns>
         public static RequestStream FromStream(Stream stream, long expectedLength)
         {
             return FromStream(stream, expectedLength, DEFAULT_SWITCHOVER_THRESHOLD, false);
         }
 
+        /// <summary>
+        /// Creates a new request stream from a stream.
+        /// </summary>
+        /// <param name="stream">The stream.</param>
+        /// <param name="expectedLength">The expected length.</param>
+        /// <param name="thresholdLength">Length of the threshold.</param>
+        /// <returns>A request stream instance</returns>
         public static RequestStream FromStream(Stream stream, long expectedLength, long thresholdLength)
         {
             return FromStream(stream, expectedLength, thresholdLength, false);
         }
 
+        /// <summary>
+        /// Creates a new request stream from a stream.
+        /// </summary>
+        /// <param name="stream">The stream.</param>
+        /// <param name="expectedLength">The expected length.</param>
+        /// <param name="disableStreamSwitching">if set to <c>true</c> [disable stream switching].</param>
+        /// <returns>A request stream instance</returns>
         public static RequestStream FromStream(Stream stream, long expectedLength, bool disableStreamSwitching)
         {
             return FromStream(stream, expectedLength, DEFAULT_SWITCHOVER_THRESHOLD, disableStreamSwitching);
         }
 
+        /// <summary>
+        /// Creates a new request stream from a stream.
+        /// </summary>
+        /// <param name="stream">The stream.</param>
+        /// <param name="expectedLength">The expected length.</param>
+        /// <param name="thresholdLength">Length of the threshold.</param>
+        /// <param name="disableStreamSwitching">if set to <c>true</c> [disable stream switching].</param>
+        /// <returns>A request stream instance</returns>
         public static RequestStream FromStream(Stream stream, long expectedLength, long thresholdLength, bool disableStreamSwitching)
         {
             return new RequestStream(stream, expectedLength, thresholdLength, disableStreamSwitching);
@@ -317,7 +356,7 @@
         /// Sets the length of the current stream.
         /// </summary>
         /// <param name="value">The desired length of the current stream in bytes. </param>
-        /// <exception cref="NotSupportedException">The stream does not support having it's length set.</exception>
+        /// <exception cref="NotSupportedException">The stream does not support having its length set.</exception>
         /// <remarks>This functionality is not supported by the <see cref="RequestStream"/> type and will always throw <see cref="NotSupportedException"/>.</remarks>
         public override void SetLength(long value)
         {
@@ -351,15 +390,31 @@
                 // in NancyWcfGenericService - webRequest.UriTemplateMatch
                 var old = this.stream;
                 this.MoveStreamContentsToFileStream();
+#if NETSTANDARD2_0
+                old.Dispose();
+#else
                 old.Close();
+#endif
             }
         }
 
         private static FileStream CreateTemporaryFileStream()
         {
-            var filePath = Path.GetTempFileName();
+            // we could use Path.GetTempFilePath() but this is problematic on Windows and more so on Mono
+            // symptoms will show when this method has been called > 65k times
+            // see docs: https://msdn.microsoft.com/en-us/library/system.io.path.gettempfilename(v=vs.110).aspx
+            // comments on Win32 implementation: https://msdn.microsoft.com/en-us/library/windows/desktop/aa364991(v=vs.85).aspx
+            // mono implementation: https://github.com/mono/mono/blob/master/mcs/class/corlib/System.IO/Path.cs#L490
 
-            return new FileStream(filePath, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 8192, true);
+            var filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".tmp");
+
+            return new FileStream(
+                filePath,
+                FileMode.Create,
+                FileAccess.ReadWrite,
+                FileShare.None,
+                8192,
+                StaticConfiguration.AllowFileStreamUploadAsync);
         }
 
         private Stream CreateDefaultMemoryStream(long expectedLength)
@@ -428,7 +483,11 @@
 
             if (this.stream.CanSeek && this.stream.Length == 0)
             {
+#if NETSTANDARD2_0
+                this.stream.Dispose();
+#else
                 this.stream.Close();
+#endif
                 this.stream = targetStream;
                 return;
             }
@@ -441,7 +500,7 @@
                 this.stream.Position = 0;
             }
             this.stream.CopyTo(targetStream, 8196);
-            if (this.stream.CanSeek)
+            if (this.stream.CanWrite)
             {
                 this.stream.Flush();
             }

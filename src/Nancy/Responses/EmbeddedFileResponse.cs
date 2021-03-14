@@ -6,7 +6,12 @@
     using System.Reflection;
     using System.Security.Cryptography;
     using System.Text;
+    using System.Text.RegularExpressions;
 
+    /// <summary>
+    /// Represent an HTML response with embeded file content.
+    /// </summary>
+    /// <seealso cref="Nancy.Response" />
     public class EmbeddedFileResponse : Response
     {
         private static readonly byte[] ErrorText;
@@ -16,6 +21,13 @@
             ErrorText = Encoding.UTF8.GetBytes("NOT FOUND");
         }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EmbeddedFileResponse"/> class, with
+        /// the provided <paramref name="assembly"/>, <paramref name="resourcePath"/> and <paramref name="name"/>.
+        /// </summary>
+        /// <param name="assembly">The assembly.</param>
+        /// <param name="resourcePath">The resource path.</param>
+        /// <param name="name">The name.</param>
         public EmbeddedFileResponse(Assembly assembly, string resourcePath, string name)
         {
             this.ContentType = MimeTypes.GetMimeType(name);
@@ -47,26 +59,24 @@
         {
             var resourceName = assembly
                 .GetManifestResourceNames()
-                .Where(x => GetFileNameFromResourceName(resourcePath, x).Equals(name, StringComparison.OrdinalIgnoreCase))
-                .Select(x => GetFileNameFromResourceName(resourcePath, x))
-                .FirstOrDefault();
+                .FirstOrDefault(x => GetFileNameFromResourceName(resourcePath, x).Equals(name, StringComparison.OrdinalIgnoreCase));
 
-            resourceName =
-                string.Concat(resourcePath, ".", resourceName);
+            if (resourceName == null)
+                return null;
 
             return assembly.GetManifestResourceStream(resourceName);
         }
 
         private static string GetFileNameFromResourceName(string resourcePath, string resourceName)
         {
-            return resourceName.Replace(resourcePath, string.Empty).Substring(1);
+            return Regex.Replace(resourceName, resourcePath, string.Empty, RegexOptions.IgnoreCase).Substring(1);
         }
 
         private static string GenerateETag(Stream stream)
         {
-            using (var md5 = MD5.Create())
+            using (var sha1 = SHA1.Create())
             {
-                var hash = md5.ComputeHash(stream);
+                var hash = sha1.ComputeHash(stream);
                 return string.Concat("\"", ByteArrayToString(hash), "\"");
             }
         }

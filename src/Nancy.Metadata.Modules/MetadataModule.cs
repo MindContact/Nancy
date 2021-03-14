@@ -27,7 +27,7 @@
         }
 
         /// <summary>
-        /// Gets the <see cref="Type"/> of metadata based on <see cref="TMetadata"/>.
+        /// Gets the <see cref="Type"/> of metadata based on <typeparamref name="TMetadata" />.
         /// </summary>
         public Type MetadataType
         {
@@ -44,9 +44,10 @@
         /// <returns>An instance of <see cref="MetadataType"/> if one exists, otherwise null.</returns>
         public object GetMetadata(RouteDescription description)
         {
-            if (this.metadata.ContainsKey(description.Name))
+            Func<RouteDescription, TMetadata> func;
+            if (this.metadata.TryGetValue(description.Name, out func))
             {
-                return this.metadata[description.Name].Invoke(description);
+                return func.Invoke(description);
             }
 
             return null;

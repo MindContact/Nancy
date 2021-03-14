@@ -1,5 +1,13 @@
 namespace Nancy.Responses.Negotiation
 {
+    using System;
+    using System.Runtime.CompilerServices;
+    using System.Threading.Tasks;
+
+    /// <summary>
+    /// Request response content negotiator.
+    /// </summary>
+    /// <seealso cref="Nancy.IHideObjectMembers" />
     public class Negotiator : IHideObjectMembers
     {
         // TODO - this perhaps should be an interface, along with the view thing above
@@ -13,7 +21,21 @@ namespace Nancy.Responses.Negotiation
         /// <param name="context">The context that should be negotiated.</param>
         public Negotiator(NancyContext context)
         {
+            if (context == null)
+            {
+                throw new ArgumentNullException("context");
+            }
+
             this.NegotiationContext = context.NegotiationContext;
+        }
+
+        /// <summary>
+        /// Gets the awaiter.
+        /// </summary>
+        /// <returns><see cref="TaskAwaiter{Negotiator}"/></returns>
+        public TaskAwaiter<Negotiator> GetAwaiter()
+        {
+            return Task.FromResult(this).GetAwaiter();
         }
 
         /// <summary>

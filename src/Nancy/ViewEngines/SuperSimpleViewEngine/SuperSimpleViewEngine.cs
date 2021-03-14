@@ -10,6 +10,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
     using System.Reflection;
     using System.Runtime.CompilerServices;
     using System.Text.RegularExpressions;
+    using System.Text;
 
     /// <summary>
     /// A super-simple view engine
@@ -44,7 +45,17 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// <summary>
         /// Compiled Regex for if blocks
         /// </summary>
-        private static readonly Regex ConditionalSubstitutionRegEx = new Regex(@"@If(?<Not>Not)?(?<Null>Null)?(?:\.(?<ModelSource>(Model|Context)+))?(?:\.(?<ParameterName>[a-zA-Z0-9-_]+))+;?(?<Contents>.*?)@EndIf;?", RegexOptions.Compiled | RegexOptions.Singleline);
+        private const string ConditionalOpenSyntaxPattern = @"@If(?<Not>Not)?(?<Null>Null)?(?:\.(?<ModelSource>(Model|Context)+))?(?:\.(?<ParameterName>[a-zA-Z0-9-_]+))+;?";
+        private const string ConditionalOpenInnerSyntaxPattern = @"@If(?:Not)?(?:Null)?(?:\.(?:(Model|Context)+))?(?:\.(?:[a-zA-Z0-9-_]+))+;?";
+        private const string ConditionalCloseStynaxPattern = @"@EndIf;?";
+         
+        private static readonly string ConditionalSubstituionPattern =
+            string.Format(@"{0}(?<Contents>:[.*]|(?>{2}(?<DEPTH>)|{1}(?<-DEPTH>)|.)*(?(DEPTH)(?!))){1}", 
+                            ConditionalOpenSyntaxPattern,
+                            ConditionalCloseStynaxPattern,
+                            ConditionalOpenInnerSyntaxPattern);
+
+        private static readonly Regex ConditionalSubstitutionRegEx = new Regex(ConditionalSubstituionPattern, RegexOptions.Compiled | RegexOptions.Singleline);
 
         /// <summary>
         /// Compiled regex for partial blocks
@@ -70,6 +81,11 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// Compiled RegEx for path expansion
         /// </summary>
         private static readonly Regex PathExpansionRegEx = new Regex(@"(?:@Path\[\'(?<Path>.+?)\'\]);?", RegexOptions.Compiled);
+
+        /// <summary>
+        /// Compiled RegEx for path expansion in attribute values
+        /// </summary>
+        private static readonly Regex AttributeValuePathExpansionRegEx = new Regex(@"(?<Attribute>[a-zA-Z]+)=(?<Quote>[""'])(?<Path>~.+?)\k<Quote>", RegexOptions.Compiled);
 
         /// <summary>
         /// Compiled RegEx for the CSRF anti forgery token
@@ -138,7 +154,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
         /// </para>
         /// <para>
         /// Anonymous types, standard types and ExpandoObject are supported.
-        /// Arbitrary dynamics (implementing IDynamicMetaObjectProvicer) are not, unless
+        /// Arbitrary dynamics (implementing IDynamicMetaObjectProvider) are not, unless
         /// they also implement IDictionary string, object for accessing properties.
         /// </para>
         /// </summary>
@@ -202,7 +218,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
             var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static);
 
             var property =
-                properties.Where(p => string.Equals(p.Name, propertyName, StringComparison.InvariantCulture)).
+                properties.Where(p => string.Equals(p.Name, propertyName, StringComparison.Ordinal)).
                 FirstOrDefault();
 
             if (property != null)
@@ -213,7 +229,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
             var fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static);
 
             var field =
-                fields.Where(p => string.Equals(p.Name, propertyName, StringComparison.InvariantCulture)).
+                fields.Where(p => string.Equals(p.Name, propertyName, StringComparison.Ordinal)).
                 FirstOrDefault();
 
             return field == null ? new Tuple<bool, object>(false, null) : new Tuple<bool, object>(true, field.GetValue(model));
@@ -486,15 +502,15 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
 
                     var contents = m.Groups["Contents"].Value;
 
-                    var result = string.Empty;
+                    var result = new StringBuilder();
                     foreach (var item in substitutionEnumerable)
                     {
                         var modifiedContent = PerformPartialSubstitutions(contents, item, host);
                         modifiedContent = PerformConditionalSubstitutions(modifiedContent, item, host);
-                        result += ReplaceCurrentMatch(modifiedContent, item, host);
+                        result.Append(ReplaceCurrentMatch(modifiedContent, item, host));
                     }
 
-                    return result;
+                    return result.ToString();
                 });
         }
 
@@ -565,7 +581,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
                         predicateResult = !predicateResult;
                     }
 
-                    return predicateResult ? m.Groups["Contents"].Value : string.Empty;
+                    return predicateResult ? PerformConditionalSubstitutions(m.Groups["Contents"].Value, model, host) : string.Empty;
                 });
 
             return result;
@@ -589,6 +605,19 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
                     var path = m.Groups["Path"].Value;
 
                     return host.ExpandPath(path);
+                });
+
+            result = AttributeValuePathExpansionRegEx.Replace(
+                result, 
+                m =>
+                {
+                    var attribute = m.Groups["Attribute"];
+                    var quote = m.Groups["Quote"].Value;
+                    var path = m.Groups["Path"].Value;
+
+                    var expandedPath = host.ExpandPath(path);
+                
+                    return string.Format("{0}={1}{2}{1}", attribute, quote, expandedPath);
                 });
 
             return result;
@@ -621,7 +650,7 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
                 result,
                 m =>
                 {
-                    var partialViewName = m.Groups["ViewName"].Value;
+                    var partialViewName = ReplaceCurrentMatch(m.Groups["ViewName"].Value, model, host);
                     var partialModel = model;
                     var properties = GetCaptureGroupValues(m, "ParameterName");
 
@@ -685,8 +714,8 @@ namespace Nancy.ViewEngines.SuperSimpleViewEngine
                 m =>
                 {
                     var sectionName = m.Groups["SectionName"].Value;
-
-                    return sections.ContainsKey(sectionName) ? sections[sectionName] : string.Empty;
+                    string sectionValue;
+                    return sections.TryGetValue(sectionName, out sectionValue) ? sectionValue : string.Empty;
                 });
 
             return result;

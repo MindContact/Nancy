@@ -2,47 +2,58 @@
 {
     using System;
     using System.IO;
-
+    using Nancy.Configuration;
     using Nancy.Xml;
 
+    /// <summary>
+    /// Represents an HTTP response with XML content.
+    /// </summary>
+    /// <typeparam name="TModel">The type of the model.</typeparam>
+    /// <seealso cref="Nancy.Response" />
     public class XmlResponse<TModel> : Response
     {
-        [Obsolete("This constructor is obsolete and will be removed in a future version.")]
-        public XmlResponse(TModel model, string contentType, ISerializer serializer) : this(model, serializer)
-        {
-            this.ContentType = contentType;
-        }
+        private readonly XmlConfiguration configuration;
 
-        public XmlResponse(TModel model, ISerializer serializer)
+        /// <summary>
+        /// Initializes a new instance of the <see cref="XmlResponse{TModel}"/> class, with
+        /// the provided <paramref name="model"/>, <paramref name="serializer"/> and <paramref name="environment"/>.
+        /// </summary>
+        /// <param name="model">The model.</param>
+        /// <param name="serializer">The serializer.</param>
+        /// <param name="environment">The environment.</param>
+        /// <exception cref="System.InvalidOperationException">XML Serializer not set</exception>
+        public XmlResponse(TModel model, ISerializer serializer, INancyEnvironment environment)
         {
             if (serializer == null)
             {
                 throw new InvalidOperationException("XML Serializer not set");
             }
 
+            this.configuration = environment.GetValue<XmlConfiguration>();
+
             this.Contents = GetXmlContents(model, serializer);
             this.ContentType = DefaultContentType;
             this.StatusCode = HttpStatusCode.OK;
         }
 
-        private static string DefaultContentType
+        private string DefaultContentType
         {
-            get { return string.Concat("application/xml", Encoding); }
+            get { return string.Concat("application/xml", this.Encoding); }
         }
 
-        private static string Encoding
+        private string Encoding
         {
             get
             {
-                return XmlSettings.EncodingEnabled
-                    ? string.Concat("; charset=", XmlSettings.DefaultEncoding.WebName)
+                return this.configuration.EncodingEnabled
+                    ? string.Concat("; charset=", this.configuration.DefaultEncoding.WebName)
                     : string.Empty;
             }
         }
 
-        private static Action<Stream> GetXmlContents(TModel model, ISerializer serializer)
+        private Action<Stream> GetXmlContents(TModel model, ISerializer serializer)
         {
-            return stream => serializer.Serialize(DefaultContentType, model, stream);
+            return stream => serializer.Serialize(this.DefaultContentType, model, stream);
         }
     }
 }

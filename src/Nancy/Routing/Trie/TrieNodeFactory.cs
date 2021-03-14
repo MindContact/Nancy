@@ -1,7 +1,7 @@
 namespace Nancy.Routing.Trie
 {
-    using System.Linq;
     using System.Collections.Generic;
+    using System.Linq;
 
     using Nancy.Routing.Constraints;
     using Nancy.Routing.Trie.Nodes;
@@ -13,6 +13,11 @@ namespace Nancy.Routing.Trie
     {
         private readonly IEnumerable<IRouteSegmentConstraint> routeSegmentConstraints;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TrieNodeFactory"/> class with
+        /// the provided <paramref name="routeSegmentConstraints"/>.
+        /// </summary>
+        /// <param name="routeSegmentConstraints">The route segment constraints.</param>
         public TrieNodeFactory(IEnumerable<IRouteSegmentConstraint> routeSegmentConstraints)
         {
             this.routeSegmentConstraints = routeSegmentConstraints;
@@ -52,7 +57,7 @@ namespace Nancy.Routing.Trie
 
             if (CaptureNodeWithMultipleParameters.IsMatch(segment))
             {
-                return new CaptureNodeWithMultipleParameters(parent, segment, this);
+                return new CaptureNodeWithMultipleParameters(parent, segment, this, routeSegmentConstraints);
             }
 
             return new LiteralNode(parent, segment, this);

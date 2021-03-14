@@ -3,9 +3,13 @@
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using System.Reflection;
+    using Nancy.Cookies;
     using Nancy.Responses.Negotiation;
-    using Cookies;
 
+    /// <summary>
+    /// Extensions for negotioator
+    /// </summary>
     public static class NegotiatorExtensions
     {
         /// <summary>
@@ -77,7 +81,7 @@
         /// </summary>
         /// <param name="negotiator">Negotiator object</param>
         /// <param name="headers">
-        /// Array of headers - each header should be a Tuple with two string elements 
+        /// Array of headers - each header should be a Tuple with two string elements
         /// for header name and header value
         /// </param>
         /// <returns>Modified negotiator</returns>
@@ -252,11 +256,11 @@
                                    .ToArray();
 
             var headerProperty = properties
-                                    .Where(p => string.Equals(p.Name, "Header", StringComparison.InvariantCultureIgnoreCase))
+                                    .Where(p => string.Equals(p.Name, "Header", StringComparison.OrdinalIgnoreCase))
                                     .FirstOrDefault();
 
             var valueProperty = properties
-                                    .Where(p => string.Equals(p.Name, "Value", StringComparison.InvariantCultureIgnoreCase))
+                                    .Where(p => string.Equals(p.Name, "Value", StringComparison.OrdinalIgnoreCase))
                                     .FirstOrDefault();
 
             if (headerProperty == null || valueProperty == null)

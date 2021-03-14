@@ -1,10 +1,14 @@
 ﻿namespace Nancy.Security
 {
     using System;
-    using Cookies;
+    using System.Collections.Generic;
+    using System.Globalization;
+    using System.Linq;
+    using System.Text;
+
     using Nancy.Bootstrapper;
+    using Nancy.Cookies;
     using Nancy.Cryptography;
-    using Nancy.Helpers;
 
     /// <summary>
     /// Csrf protection methods
@@ -12,13 +16,17 @@
     public static class Csrf
     {
         private const string CsrfHookName = "CsrfPostHook";
+        private const char ValueDelimiter = '#';
+        private const char PairDelimiter = '|';
 
         /// <summary>
         /// Enables Csrf token generation.
-        /// This is disabled by default.
         /// </summary>
-        /// <param name="pipelines">Application pipelines</param>
-        public static void Enable(IPipelines pipelines, CryptographyConfiguration cryptographyConfiguration = null)
+        /// <remarks>This is disabled by default.</remarks>
+        /// <param name="pipelines">The application pipelines.</param>
+        /// <param name="cryptographyConfiguration">The cryptography configuration. This is <see langword="null" /> by default.</param>
+        /// <param name="useSecureCookie">Set the CSRF cookie secure flag. This is <see langword="false"/> by default</param>
+        public static void Enable(IPipelines pipelines, CryptographyConfiguration cryptographyConfiguration = null, bool useSecureCookie = false)
         {
             cryptographyConfiguration = cryptographyConfiguration ?? CsrfApplicationStartup.CryptographyConfiguration;
 
@@ -31,36 +39,33 @@
                         return;
                     }
 
-                    if (context.Items.ContainsKey(CsrfToken.DEFAULT_CSRF_KEY))
+                    object value;
+                    if (context.Items.TryGetValue(CsrfToken.DEFAULT_CSRF_KEY, out value))
                     {
-                        context.Response.Cookies.Add(new NancyCookie(CsrfToken.DEFAULT_CSRF_KEY,
-                                                                     (string)context.Items[CsrfToken.DEFAULT_CSRF_KEY],
-                                                                     true));
+                        context.Response.Cookies.Add(new NancyCookie(
+                            CsrfToken.DEFAULT_CSRF_KEY,
+                            (string)value,
+                            true, useSecureCookie));
+
                         return;
                     }
 
-                    if (context.Request.Cookies.ContainsKey(CsrfToken.DEFAULT_CSRF_KEY))
+                    string cookieValue;
+                    if (context.Request.Cookies.TryGetValue(CsrfToken.DEFAULT_CSRF_KEY, out cookieValue))
                     {
-                        var decodedValue = HttpUtility.UrlDecode(context.Request.Cookies[CsrfToken.DEFAULT_CSRF_KEY]);
-                        var cookieToken = CsrfApplicationStartup.ObjectSerializer.Deserialize(decodedValue) as CsrfToken;
+                        var cookieToken = ParseToCsrfToken(cookieValue);
 
                         if (CsrfApplicationStartup.TokenValidator.CookieTokenStillValid(cookieToken))
                         {
-                            context.Items[CsrfToken.DEFAULT_CSRF_KEY] = decodedValue;
+                            context.Items[CsrfToken.DEFAULT_CSRF_KEY] = cookieValue;
                             return;
                         }
                     }
 
-                    var token = new CsrfToken
-                    {
-                        CreatedDate = DateTime.Now,
-                    };
-                    token.CreateRandomBytes();
-                    token.CreateHmac(cryptographyConfiguration.HmacProvider);
-                    var tokenString = CsrfApplicationStartup.ObjectSerializer.Serialize(token);
+                    var tokenString = GenerateTokenString(cryptographyConfiguration);
 
                     context.Items[CsrfToken.DEFAULT_CSRF_KEY] = tokenString;
-                    context.Response.Cookies.Add(new NancyCookie(CsrfToken.DEFAULT_CSRF_KEY, tokenString, true));
+                    context.Response.Cookies.Add(new NancyCookie(CsrfToken.DEFAULT_CSRF_KEY, tokenString, true, useSecureCookie));
                 });
 
             pipelines.AfterRequest.AddItemToEndOfPipeline(postHook);
@@ -80,21 +85,38 @@
         /// Only necessary if a particular route requires a new token for each request.
         /// </summary>
         /// <param name="module">Nancy module</param>
-        /// <returns></returns>
+        /// <param name="cryptographyConfiguration">The cryptography configuration. This is <c>null</c> by default.</param>
         public static void CreateNewCsrfToken(this INancyModule module, CryptographyConfiguration cryptographyConfiguration = null)
         {
-            cryptographyConfiguration = cryptographyConfiguration ?? CsrfApplicationStartup.CryptographyConfiguration;
+            var tokenString = GenerateTokenString(cryptographyConfiguration);
+            module.Context.Items[CsrfToken.DEFAULT_CSRF_KEY] = tokenString;
+        }
 
+        /// <summary>
+        /// Creates a new csrf token with an optional salt.
+        /// Does not store the token in context.
+        /// </summary>
+        /// <returns>The generated token</returns>
+        internal static string GenerateTokenString(CryptographyConfiguration cryptographyConfiguration = null)
+        {
+            cryptographyConfiguration = cryptographyConfiguration ?? CsrfApplicationStartup.CryptographyConfiguration;
             var token = new CsrfToken
             {
-                CreatedDate = DateTime.Now,
+                CreatedDate = DateTimeOffset.Now
             };
+
             token.CreateRandomBytes();
             token.CreateHmac(cryptographyConfiguration.HmacProvider);
 
-            var tokenString = CsrfApplicationStartup.ObjectSerializer.Serialize(token);
+            var builder = new StringBuilder();
 
-            module.Context.Items[CsrfToken.DEFAULT_CSRF_KEY] = tokenString;
+            builder.AppendFormat("RandomBytes{0}{1}", ValueDelimiter, Convert.ToBase64String(token.RandomBytes));
+            builder.Append(PairDelimiter);
+            builder.AppendFormat("Hmac{0}{1}", ValueDelimiter, Convert.ToBase64String(token.Hmac));
+            builder.Append(PairDelimiter);
+            builder.AppendFormat("CreatedDate{0}{1}", ValueDelimiter, token.CreatedDate.ToString("o", CultureInfo.InvariantCulture));
+
+            return builder.ToString();
         }
 
         /// <summary>
@@ -114,9 +136,9 @@
             }
 
             var cookieToken = GetCookieToken(request);
-            var formToken = GetFormToken(request);
+            var providedToken = GetProvidedToken(request);
 
-            var result = CsrfApplicationStartup.TokenValidator.Validate(cookieToken, formToken, validityPeriod);
+            var result = CsrfApplicationStartup.TokenValidator.Validate(cookieToken, providedToken, validityPeriod);
 
             if (result != CsrfTokenValidationResult.Ok)
             {
@@ -124,17 +146,17 @@
             }
         }
 
-        private static CsrfToken GetFormToken(Request request)
+        private static CsrfToken GetProvidedToken(Request request)
         {
-            CsrfToken formToken = null;
+            CsrfToken providedToken = null;
 
-            var formTokenString = request.Form[CsrfToken.DEFAULT_CSRF_KEY].Value;
-            if (formTokenString != null)
+            var providedTokenString = request.Form[CsrfToken.DEFAULT_CSRF_KEY].Value ?? request.Headers[CsrfToken.DEFAULT_CSRF_KEY].FirstOrDefault();
+            if (providedTokenString != null)
             {
-                formToken = CsrfApplicationStartup.ObjectSerializer.Deserialize(formTokenString) as CsrfToken;
+                providedToken = ParseToCsrfToken(providedTokenString);
             }
 
-            return formToken;
+            return providedToken;
         }
 
         private static CsrfToken GetCookieToken(Request request)
@@ -144,10 +166,67 @@
             string cookieTokenString;
             if (request.Cookies.TryGetValue(CsrfToken.DEFAULT_CSRF_KEY, out cookieTokenString))
             {
-                cookieToken = CsrfApplicationStartup.ObjectSerializer.Deserialize(HttpUtility.UrlDecode(cookieTokenString)) as CsrfToken;
+                cookieToken = ParseToCsrfToken(cookieTokenString);
             }
 
             return cookieToken;
+        }
+
+        private static void AddTokenValue(Dictionary<string, string> dictionary, string key, string value)
+        {
+            if (!string.IsNullOrEmpty(key))
+            {
+                dictionary.Add(key, value);
+            }
+        }
+
+        private static CsrfToken ParseToCsrfToken(string cookieTokenString)
+        {
+            var parsed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            var currentKey = string.Empty;
+            var buffer = new StringBuilder();
+
+            for (var index = 0; index < cookieTokenString.Length; index++)
+            {
+                var currentCharacter = cookieTokenString[index];
+
+                switch (currentCharacter)
+                {
+                    case ValueDelimiter:
+                        currentKey = buffer.ToString();
+                        buffer.Clear();
+                        break;
+                    case PairDelimiter:
+                        AddTokenValue(parsed, currentKey, buffer.ToString());
+                        buffer.Clear();
+                        break;
+                    default:
+                        buffer.Append(currentCharacter);
+                        break;
+                }
+            }
+
+            AddTokenValue(parsed, currentKey, buffer.ToString());
+
+            if (parsed.Keys.Count() != 3)
+            {
+                return null;
+            }
+
+            try
+            {
+                return new CsrfToken
+                {
+                    CreatedDate = DateTimeOffset.ParseExact(parsed["CreatedDate"], "o", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal),
+                    Hmac = Convert.FromBase64String(parsed["Hmac"]),
+                    RandomBytes = Convert.FromBase64String(parsed["RandomBytes"])
+                };
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }
